@@ -6,6 +6,7 @@ ec2 = boto3.resource('ec2')
 user_data = '''#!/bin/bash
 yum -y update && yum -y upgrade
 yum -y install python36 python36-devel python36-pip python36-setuptools
+python36 -m pip install --upgrade pip
 python36 -m pip install boto3 beautifulsoup4 tweepy
 '''
 
