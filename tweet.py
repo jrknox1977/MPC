@@ -1,15 +1,15 @@
-import praw
+import tweepy
 import logging
 import time
 import os
-import boto3
 from boto3 import resource
-import urllib.request
 from boto3.dynamodb.conditions import Key
 
 
-class RipReddit:
+class TweetPics:
     def __init__(self):
+
+        self.table_name = os.environ['REDDIT_TABLE_NAME']
 
         # -----> SETUP LOGGING <-----
         self.logger = logging.getLogger(__name__)
@@ -24,30 +24,19 @@ class RipReddit:
         self.s3 = resource('s3')
 
         # -----> DUPLICATE PROCESS PROTECTION <-----
-        self.pid_file = '/tmp/rip_reddit.pid'
+        self.pid_file = '/tmp/rip_tweet.pid'
         self.pid_check()
 
-        # -----> REDDIT INFO <-----
-        self.reddit = praw.Reddit(client_id=os.environ['CLIENT_ID'],
-                                  client_secret=os.environ['CLIENT_SECRET'],
-                                  username=os.environ['USERNAME'],
-                                  password=os.environ['PASSWORD'],
-                                  user_agent=os.environ['USER_AGENT'])
+        # -----> TWITTER AUTH <----
+        mcp_auth = tweepy.OAuthHandler(os.environ['CONSUMER_KEY'], os.environ['CONSUMER_SECRET'])
+        mcp_auth.set_access_token(os.environ['ACCESS_TOKEN'], os.environ['ACCESS_TOKEN_SECRET'])
+        mcp_auth.secure = True
+        self.mcp_tweet = tweepy.API(mcp_auth)
 
-        self.subreddit = self.reddit.subreddit(os.environ['SUBREDDIT'])
+        self.kb_message = "#cats #python #reddit #IndyPy"
 
-        self.table_name = os.environ['REDDIT_TABLE_NAME']
-
-        # -----> PICTURE RIP INFO <-----
-        self.rekog = boto3.client('rekognition', region_name='us-east-2')
-        self.image_path = '/tmp/images'
-        if not os.path.exists(self.image_path):
-            os.makedirs(self.image_path)
-            self.logger.info("Created path: " + self.image_path)
-
-    @staticmethod
-    def curr_time():
-        return int(round(time.time() * 1000))
+        self.myBot = self.mcp_tweet.get_user(screen_name="@Xonk_dp")
+        self.logger.info("-------------> CONNECTED TO TWITTER!!! <-----------------")
 
     # -----> CHECK IF PROGRAM IS ALREADY RUNNING <-----
     def pid_check(self):
@@ -57,76 +46,25 @@ class RipReddit:
         else:
             with open(self.pid_file, 'w+') as f:
                 f.write(str(os.getpid()))
-                self.logger.info("Reddit Cat Scraper Initiated!")
+                self.logger.info("Twitter Bot Initiated!")
 
-    # -----> STREAM DATA FROM REDDIT <-----
-    def reddit_stream(self, dyna):
-        i = 0
-        while True:
-            for submission in self.subreddit.stream.submissions():
-                try:
-                    cat_stuff = {'epoch_time': str(self.curr_time()),
-                                 'submission_id': submission.id,
-                                 'submission_url': submission.url,
-                                 'downloaded': 'False',
-                                 'stored_to_s3': 'False',
-                                 'tweet': 'Not_Ready'}
-                    dyna.add_item(self.table_name, cat_stuff)
-                    self.logger.info('Submission: ' + submission.id + ' received!')
-                except Exception as e:
-                    self.logger.error('Something went wrong, here it is: ' + str(e))
-                if i >= 20:
-                    self.rip_picture(dyna)
-                    time.sleep(300)
-                    i = 0
-                else:
-                    i += 1
+    def update_status_with_media(self, kb_message, image):
+        self.mcp_tweet.update_with_media(image, kb_message)
+        print("Image Uploaded")
 
-    # -----> AWS REKOGNITION <-----
-    def get_rekognition_info(self, filename):
-        with open(filename, 'rb') as imgfile:
-            results = self.rekog.detect_labels(Image={'Bytes': imgfile.read()}, MinConfidence=1)
-        return results
-
-    # -----> RIP PICTURE <-----
-    def rip_picture(self, dyna):
-        items = dyna.scan_table_allpages(self.table_name, filter_key='downloaded', filter_value='False')
-        for item in items:
-            image_file_name = item['submission_url'].split('/')[-1]
-
-            if image_file_name.lower().endswith('.jpg'):
-                full_path = self.image_path + '/' + image_file_name
-                try:
-                    urllib.request.urlretrieve(item['submission_url'], full_path)
-                    self.logger.info("Image Retrieved: " + image_file_name)
-                except Exception as e:
-                    self.logger.error('=========================\n' + item['submission_url'] + 'FAILED: ' + str(e)
-                                      + '\n=========================')
-                # dyn.delete_item(table_name, 'epoch_time', item['epoch_time'])
-                image_info = self.get_rekognition_info(full_path)
-                for stuff in image_info['Labels']:
-                    print(type(stuff))
-                    if stuff['Name'] == 'Person' or stuff['Name'] == 'Human':
-                        self.logger.info("There is a person in this image! -----> DEREZ <-----")
-                        os.remove(full_path)
-                        dyna.delete_item(self.table_name, 'epoch_time', item['epoch_time'])
-                    elif stuff['Name'] == 'Cat':
-                        self.logger.info("There is a CAT in this image! -----> APPROPRIATING CAT <-------")
-                        self.s3.meta.client.upload_file(full_path, 'master-control-program', 'images/'
-                                                        + image_file_name)
-                        try:
-                            self.logger.info("DOWNLOADED: Updating DynamoDB: "
-                                             + str(dyna.update_item('epoch_time', item['epoch_time'],
-                                                                    'downloaded', 'False', 'True')))
-                            self.logger.info("READY FOR TWEET: Updating DynamoDB: "
-                                             + str(dyna.update_item('epoch_time', item['epoch_time'],
-                                                                    'tweet', 'NOT_READY', 'READY')))
-
-                        except Exception as e:
-                            self.logger.error('ERROR: ' + str(e))
+    def tweet_pics(self, dyna):
+        pics = dyna.scan_table_allpages(self.table_name, filter_key='tweet', filter_value='READY')
+        self.logger.info(" ---> GRABBING PICS READY TO TWEET <---" )
+        for pic in pics:
+            image_file_name = '/tmp/images/' + pic['submission_url'].split('/')[-1]
+            if os.path.exists(image_file_name):
+                self.update_status_with_media(self.kb_message, image_file_name)
+                self.logger.info("!!! TWEETED: " + image_file_name + " !!!")
+            self.logger.info("PICTURE TWEETED: Updating DynamoDB: " + str(dyna.update_item('epoch_time', pic['epoch_time'], 'tweet',
+                                                                        'READY', 'DONE')))
+            time.sleep(30)
 
 
-# -----> DynamoDB WRAPPER FUNCTIONS <-----
 class DynamodbWrappers:
     def __init__(self):
         self.dynamodb_resource = resource('dynamodb', region_name='us-east-2')
@@ -265,8 +203,8 @@ class DynamodbWrappers:
         return response
 
 
-rip = RipReddit()
-dynamo = DynamodbWrappers()
-dynamo.set_table_name(rip.table_name)
+tweet = TweetPics()
+dynamite = DynamodbWrappers()
+dynamite.set_table_name(tweet.table_name)
 while True:
-    rip.reddit_stream(dynamo)
+    tweet.tweet_pics(dynamite)
