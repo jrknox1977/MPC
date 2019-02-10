@@ -2,6 +2,7 @@ import tweepy
 import logging
 import time
 import os
+from botocore.errorfactory import ClientError
 from boto3 import resource
 from boto3.dynamodb.conditions import Key
 
@@ -33,10 +34,15 @@ class TweetPics:
         mcp_auth.secure = True
         self.mcp_tweet = tweepy.API(mcp_auth)
 
-        self.kb_message = "#cats #python #reddit #IndyPy"
+        self.kb_message = "#cats #catsoftwitter #python #reddit #IndyPy"
 
         self.myBot = self.mcp_tweet.get_user(screen_name="@Xonk_dp")
         self.logger.info("-------------> CONNECTED TO TWITTER!!! <-----------------")
+
+    def sleepy_time(self, num):
+        for i in range(0, num):
+            self.logger.info("Tweet in sleepy time for " + str(num - i) + " minutes.")
+            time.sleep(60)
 
     # -----> CHECK IF PROGRAM IS ALREADY RUNNING <-----
     def pid_check(self):
@@ -54,15 +60,33 @@ class TweetPics:
 
     def tweet_pics(self, dyna):
         pics = dyna.scan_table_allpages(self.table_name, filter_key='tweet', filter_value='READY')
-        self.logger.info(" ---> GRABBING PICS READY TO TWEET <---" )
+        self.logger.info(" ---> GRABBING PICS READY TO TWEET <---")
         for pic in pics:
             image_file_name = '/tmp/images/' + pic['submission_url'].split('/')[-1]
             if os.path.exists(image_file_name):
                 self.update_status_with_media(self.kb_message, image_file_name)
                 self.logger.info("!!! TWEETED: " + image_file_name + " !!!")
-            self.logger.info("PICTURE TWEETED: Updating DynamoDB: " + str(dyna.update_item('epoch_time', pic['epoch_time'], 'tweet',
-                                                                        'READY', 'DONE')))
-            time.sleep(30)
+                self.logger.info("PICTURE TWEETED: Updating DynamoDB: "
+                                 + str(dyna.update_item('epoch_time', pic['epoch_time'], 'tweet', 'READY', 'DONE')))
+                self.sleepy_time(5)
+            else:
+                try:
+                    self.s3.Bucket('master-control-program').download_file('images/' + pic['submission_url']
+                                                                           .split('/')[-1], image_file_name)
+
+                except ClientError as e:
+                    if e.response['Error']['Code'] == "404":
+                        self.logger.info("The File Does not exist locally or in S3, DELETING DynamoDB record.")
+                        dyna.delete_item(self.table_name, 'epoch_time', pic['epoch_time'])
+                else:
+                    dyna.delete_item(self.table_name, 'epoch_time', pic['epoch_time'])
+                    self.update_status_with_media(self.kb_message, image_file_name)
+                    self.logger.info("!!! TWEETED: " + image_file_name + " !!!")
+                    self.logger.info("PICTURE TWEETED: Updating DynamoDB: "
+                                     + str(dyna.update_item('epoch_time', pic['epoch_time'], 'tweet', 'READY', 'DONE')))
+                    self.sleepy_time(5)
+
+            self.sleepy_time(5)
 
 
 class DynamodbWrappers:
