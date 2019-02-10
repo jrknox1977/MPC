@@ -1,21 +1,23 @@
 import argparse
 import boto3
-import logging
 import configparser
-from collections import defaultdict
+import logging
 import time
+from collections import defaultdict
 
 
 # -----> MASTER CONTROL PROGRAM <-----
 class MCP:
     def __init__(self):
 
-        # ----> BOTO3 EC2 SETUP <----
+        # ----> BOTO3 SETUP <----
+        self.s3 = boto3.resource('s3')
+
         self.ec2 = boto3.resource('ec2')
         self.instance_name = 'MCP_cloud'
         self.image_id = 'ami-0cd3dfa4e37921605'  # 'ami-9c0638f9' - centos7
         self.image_type = 't2.micro'
-        self.image_role = 'EC2-S3'
+        self.image_role = 'ec2-admin'
 
         # -----> SETUP LOGGING <-----
         self.logger = logging.getLogger(__name__)
@@ -57,18 +59,40 @@ class MCP:
         self.user_agent = parser['reddit']['user_agent']
         self.subreddit = parser['reddit']['subreddit']
         self.reddit_table_name = parser['dynamodb']['table_name']
+        self.access_token = parser['twitter']['access_token']
+        self.access_token_secret = parser['twitter']['access_token_secret']
+        self.consumer_key = parser['twitter']['consumer_key']
+        self.consumer_secret = parser['twitter']['consumer_secret']
 
         # -----> EC2 STARTUP SCRIPT <-----
         self.user_data = '#!/bin/bash \nyum -y update && yum -y upgrade \nyum -y install python36 python36-devel ' \
-                         'python36-pip python36-setuptools \npython36 -m pip install --upgrade pip \npython36 -m pip ' \
-                         'install boto3 tweepy\n touch /tmp/text.txt \n' \
+                         'python36-pip python36-setuptools git \n' \
+                         'python36 -m pip install --upgrade pip \npython36 -m pip install boto3 tweepy praw \n' \
+                         'echo "ACCESS_TOKEN=' + self.access_token + '" >> /etc/environment\n' \
+                         'echo "ACCESS_TOKEN_SECRET=' + self.access_token_secret + '" >> /etc/environment\n' \
+                         'echo "CONSUMER_KEY=' + self.consumer_key + '" >> /etc/environment\n' \
+                         'echo "CONSUMER_SECRET=' + self.consumer_secret + '" >> /etc/environment\n' \
                          'echo "CLIENT_ID=' + self.client_id + '" >> /etc/environment\n' \
                          'echo "CLIENT_SECRET=' + self.client_secret + '" >> /etc/environment\n' \
                          'echo "USERNAME=' + self.username + '" >> /etc/environment\n' \
                          'echo "PASSWORD=' + self.password + '" >> /etc/environment\n' \
                          'echo "USER_AGENT=' + self.user_agent + '" >> /etc/environment\n' \
                          'echo "SUBREDDIT=' + self.subreddit + '" >> /etc/environment\n' \
-                         'echo "REDDIT_TABLE_NAME=' + self.reddit_table_name + '" >> /etc/environment\n'
+                         'echo "REDDIT_TABLE_NAME=' + self.reddit_table_name + '" >> /etc/environment\n' \
+                         'aws s3 cp s3://master-control-program/tweet.py /tmp \n' \
+                         'aws s3 cp s3://master-control-program/rip_reddit.py /tmp \n' \
+                         'touch /tmp/MCP_Master_Log.log \n' \
+                         'crontab -l | { cat; echo "*/5 * * * * python36 /tmp/rip_reddit.py"; } | crontab - \n' \
+                         'crontab -l | { cat; echo "*/5 * * * * python36 /tmp/tweet.py"; } | crontab - \n'
+
+        # -----> COPY FILES TO S3 <-----
+        try:
+            self.s3.meta.client.upload_file('rip_reddit.py', 'master-control-program', 'rip_reddit.py')
+            self.s3.meta.client.upload_file('tweet.py', 'master-control-program', 'tweet.py')
+        except Exception as e:
+            self.logger.error('ERROR: ' + str(e))
+        self.logger.info("Initialization complete...Waiting 60 seconds for files to move, etc.....")
+        time.sleep(60)
 
     # -----> CREATE EC2 INSTANCE <-----
     def create_ec2(self):
@@ -140,5 +164,5 @@ if master_control_program.get_info:
     master_control_program.get_ec2_info()
     exit()
 master_control_program.create_ec2()
-time.sleep(30)
+time.sleep(60)
 master_control_program.get_ec2_info()
