@@ -1,5 +1,18 @@
 import boto3
 from collections import defaultdict
+import logging
+
+# -----> SETUP LOGGING <-----
+LOG_FILE = '/var/log/MCP_Master_Log.log'
+logger = logging.getLogger(__name__)
+handler = logging.FileHandler(LOG_FILE)
+handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+logger.info("Gathering EC2 Info....")
+ec2 = boto3.resource('ec2')
 
 # Connect to EC2
 ec2 = boto3.resource('ec2')
@@ -15,6 +28,7 @@ for instance in running_instances:
     # Add instance info to a dictionary
     ec2info[instance.id] = {
         'Name': name,
+        'Instance_ID': instance.id,
         'Type': instance.instance_type,
         'State': instance.state['Name'],
         'Private IP': instance.private_ip_address,
@@ -22,8 +36,9 @@ for instance in running_instances:
         'Launch Time': instance.launch_time
         }
 
-attributes = ['Name', 'Type', 'State', 'Private IP', 'Public IP', 'Launch Time']
+attributes = ['Name', 'Instance_ID', 'Type', 'State', 'Private IP', 'Public IP', 'Launch Time']
 for instance_id, instance in ec2info.items():
     for key in attributes:
+        logger.info("{0}: {1}".format(key, instance[key]))
         print("{0}: {1}".format(key, instance[key]))
 print("------")
