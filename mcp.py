@@ -66,8 +66,8 @@ class MCP:
 
         # -----> EC2 STARTUP SCRIPT <-----
         self.user_data = '#!/bin/bash \nyum -y update && yum -y upgrade \nyum -y install python36 python36-devel ' \
-                         'python36-pip python36-setuptools git \n' \
-                         'python36 -m pip install --upgrade pip \npython36 -m pip install boto3 tweepy praw \n' \
+                         'python36-pip python36-setuptools git gcc \n' \
+                         'python36 -m pip install --upgrade pip \npython36 -m pip install boto3 tweepy praw psutil \n'\
                          'echo "ACCESS_TOKEN=' + self.access_token + '" >> /etc/environment\n' \
                          'echo "ACCESS_TOKEN_SECRET=' + self.access_token_secret + '" >> /etc/environment\n' \
                          'echo "CONSUMER_KEY=' + self.consumer_key + '" >> /etc/environment\n' \

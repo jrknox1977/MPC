@@ -1,10 +1,11 @@
-import tweepy
-import logging
-import time
-import os
-from botocore.errorfactory import ClientError
 from boto3 import resource
 from boto3.dynamodb.conditions import Key
+from botocore.errorfactory import ClientError
+import logging
+import os
+import psutil
+import time
+import tweepy
 
 
 class TweetPics:
@@ -25,8 +26,10 @@ class TweetPics:
         self.s3 = resource('s3')
 
         # -----> DUPLICATE PROCESS PROTECTION <-----
-        self.pid_file = '/tmp/rip_tweet.pid'
+        self.pid_file = '/tmp/tweet.pid'
+        self.buddy_pid = '/tmp/rip_reddit.pid'
         self.pid_check()
+        self.process_to_check = 'python36'
 
         # -----> TWITTER AUTH <----
         mcp_auth = tweepy.OAuthHandler(os.environ['CONSUMER_KEY'], os.environ['CONSUMER_SECRET'])
@@ -39,6 +42,18 @@ class TweetPics:
         self.myBot = self.mcp_tweet.get_user(screen_name="@Xonk_dp")
         self.logger.info("-------------> CONNECTED TO TWITTER!!! <-----------------")
 
+    # -----> BUDDY CHECK <-----
+    def buddy_check(self):
+        num = 0
+        for proc in psutil.process_iter():
+            try:
+                if self.process_to_check.lower() in proc.name().lower():
+                    num += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+        if num < 2:
+            os.remove(self.buddy_pid)
+
     def sleepy_time(self, num):
         for i in range(0, num):
             self.logger.info("Tweet in sleepy time for " + str(num - i) + " minutes.")
@@ -47,7 +62,7 @@ class TweetPics:
     # -----> CHECK IF PROGRAM IS ALREADY RUNNING <-----
     def pid_check(self):
         if os.path.exists(self.pid_file):
-            self.logger.error("REDDIT PID file Already exists. Exiting...")
+            self.logger.error("TWEET PID file Already exists. Exiting...")
             exit(0)
         else:
             with open(self.pid_file, 'w+') as f:
@@ -63,6 +78,7 @@ class TweetPics:
         self.logger.info(" ---> GRABBING PICS READY TO TWEET <---")
         for pic in pics:
             image_file_name = '/tmp/images/' + pic['submission_url'].split('/')[-1]
+            self.logger.info("Tweet: Checking if Image Exists")
             if os.path.exists(image_file_name):
                 self.update_status_with_media(self.kb_message, image_file_name)
                 self.logger.info("!!! TWEETED: " + image_file_name + " !!!")
@@ -71,8 +87,10 @@ class TweetPics:
                 self.sleepy_time(5)
             else:
                 try:
+                    self.logger.info("Tweet: Trying to grab file from S3 ")
                     self.s3.Bucket('master-control-program').download_file('images/' + pic['submission_url']
                                                                            .split('/')[-1], image_file_name)
+                    self.logger.info("Tweet: Successfully Grabbed Image!")
 
                 except ClientError as e:
                     if e.response['Error']['Code'] == "404":
@@ -85,8 +103,6 @@ class TweetPics:
                     self.logger.info("PICTURE TWEETED: Updating DynamoDB: "
                                      + str(dyna.update_item('epoch_time', pic['epoch_time'], 'tweet', 'READY', 'DONE')))
                     self.sleepy_time(5)
-
-            self.sleepy_time(5)
 
 
 class DynamodbWrappers:
@@ -232,3 +248,4 @@ dynamite = DynamodbWrappers()
 dynamite.set_table_name(tweet.table_name)
 while True:
     tweet.tweet_pics(dynamite)
+    tweet.buddy_check()

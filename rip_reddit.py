@@ -1,11 +1,12 @@
-import praw
-import logging
-import time
-import os
 import boto3
 from boto3 import resource
-import urllib.request
 from boto3.dynamodb.conditions import Key
+import logging
+import os
+import praw
+import psutil
+import time
+import urllib.request
 
 
 class RipReddit:
@@ -25,7 +26,9 @@ class RipReddit:
 
         # -----> DUPLICATE PROCESS PROTECTION <-----
         self.pid_file = '/tmp/rip_reddit.pid'
+        self.buddy_pid = '/tmp/tweet.pid'
         self.pid_check()
+        self.process_to_check = 'python36'
 
         # -----> REDDIT INFO <-----
         self.reddit = praw.Reddit(client_id=os.environ['CLIENT_ID'],
@@ -59,34 +62,53 @@ class RipReddit:
                 f.write(str(os.getpid()))
                 self.logger.info("Reddit Cat Scraper Initiated!")
 
+    # -----> BUDDY CHECK <-----
+    def buddy_check(self):
+        num = 0
+        for proc in psutil.process_iter():
+            try:
+                if self.process_to_check.lower() in proc.name().lower():
+                    num += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+        if num < 2:
+            os.remove(self.buddy_pid)
+
     # -----> STREAM DATA FROM REDDIT <-----
-    def reddit_stream(self, dyna):
+    def reddit_stream(self, dyna, num):
         i = 0
-        while True:
-            for submission in self.subreddit.stream.submissions():
-                try:
-                    cat_stuff = {'epoch_time': str(self.curr_time()),
-                                 'submission_id': submission.id,
-                                 'submission_url': submission.url,
-                                 'downloaded': 'False',
-                                 'stored_to_s3': 'False',
-                                 'tweet': 'Not_Ready'}
-                    dyna.add_item(self.table_name, cat_stuff)
-                    self.logger.info('Submission: ' + submission.id + ' received!')
-                except Exception as e:
-                    self.logger.error('Something went wrong, here it is: ' + str(e))
-                if i >= 20:
-                    self.rip_picture(dyna)
-                    time.sleep(300)
-                    i = 0
-                else:
-                    i += 1
+        for submission in self.subreddit.stream.submissions():
+            try:
+                cat_stuff = {'epoch_time': str(self.curr_time()),
+                             'submission_id': submission.id,
+                             'submission_url': submission.url,
+                             'downloaded': 'False',
+                             'stored_to_s3': 'False',
+                             'tweet': 'Not_Ready'}
+                dyna.add_item(self.table_name, cat_stuff)
+                self.logger.info('Submission: ' + submission.id + ' received!')
+            except Exception as e:
+                self.logger.error('Something went wrong, here it is: ' + str(e))
+            if i >= num:
+                return
+            else:
+                i += 1
 
     # -----> AWS REKOGNITION <-----
     def get_rekognition_info(self, filename):
-        with open(filename, 'rb') as imgfile:
-            results = self.rekog.detect_labels(Image={'Bytes': imgfile.read()}, MinConfidence=1)
-        return results
+        try:
+            with open(filename, 'rb') as imgfile:
+                results = self.rekog.detect_labels(Image={'Bytes': imgfile.read()}, MinConfidence=1)
+            return results
+        except Exception as e:
+            self.looger.error("Could not open file: " + filename)
+            return {}
+
+    # -----> SLEEPY TIME! <-----
+    def sleepy_time(self, num):
+        for i in range(0, num):
+            self.logger.info("REDDIT RIPPER in sleepy time for " + str(num - i) + " minutes.")
+            time.sleep(60)
 
     # -----> RIP PICTURE <-----
     def rip_picture(self, dyna):
@@ -100,16 +122,17 @@ class RipReddit:
                     urllib.request.urlretrieve(item['submission_url'], full_path)
                     self.logger.info("Image Retrieved: " + image_file_name)
                 except Exception as e:
-                    self.logger.error('=========================\n' + item['submission_url'] + 'FAILED: ' + str(e)
-                                      + '\n=========================')
+                    self.logger.error('=======\n' + item['submission_url'] + ' FAILED: ' + str(e) + '\n=======')
+                    continue
                 # dyn.delete_item(table_name, 'epoch_time', item['epoch_time'])
                 image_info = self.get_rekognition_info(full_path)
                 for stuff in image_info['Labels']:
-                    print(type(stuff))
                     if stuff['Name'] == 'Person' or stuff['Name'] == 'Human':
                         self.logger.info("There is a person in this image! -----> DEREZ <-----")
-                        os.remove(full_path)
-                        dyna.delete_item(self.table_name, 'epoch_time', item['epoch_time'])
+                        try:
+                            dyna.delete_item(self.table_name, 'epoch_time', item['epoch_time'])
+                        except Exception as e:
+                            self.logger.info("There was an ERROR deleting the DB entry: " + str(e))
                     elif stuff['Name'] == 'Cat':
                         self.logger.info("There is a CAT in this image! -----> APPROPRIATING CAT <-------")
                         self.s3.meta.client.upload_file(full_path, 'master-control-program', 'images/'
@@ -118,10 +141,18 @@ class RipReddit:
                             self.logger.info("DOWNLOADED: Updating DynamoDB: "
                                              + str(dyna.update_item('epoch_time', item['epoch_time'],
                                                                     'downloaded', 'False', 'True')))
+                        except Exception as e:
+                            self.logger.error('ERROR: ' + str(e))
+                        try:
                             self.logger.info("READY FOR TWEET: Updating DynamoDB: "
                                              + str(dyna.update_item('epoch_time', item['epoch_time'],
                                                                     'tweet', 'NOT_READY', 'READY')))
-
+                        except Exception as e:
+                            self.logger.error('ERROR: ' + str(e))
+                        try:
+                            self.logger.info("UPLOADED TO S3: Updating DynamoDB: "
+                                             + str(dyna.update_item('epoch_time', item['epoch_time'],
+                                                                    'stored_to_s3', 'False', 'True')))
                         except Exception as e:
                             self.logger.error('ERROR: ' + str(e))
 
@@ -269,4 +300,8 @@ rip = RipReddit()
 dynamo = DynamodbWrappers()
 dynamo.set_table_name(rip.table_name)
 while True:
-    rip.reddit_stream(dynamo)
+    rip.reddit_stream(dynamo, 20)
+    rip.rip_picture(dynamo)
+    rip.buddy_check()
+    rip.sleepy_time(5)
+
