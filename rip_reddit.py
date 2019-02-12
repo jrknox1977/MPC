@@ -7,10 +7,20 @@ import praw
 import psutil
 import time
 import urllib.request
+from splunk_handler import SplunkHandler
 
 
 class RipReddit:
     def __init__(self):
+
+        # ----> Splunk Log to HEC <----
+        splunk = SplunkHandler(
+            host='98.214.82.236',
+            port='8088',
+            token='e95a7c92-4442-44b6-af83-c11d2946f64b',
+            index='mcp',
+            verify=False
+        )
 
         # -----> SETUP LOGGING <-----
         self.logger = logging.getLogger(__name__)
@@ -19,6 +29,7 @@ class RipReddit:
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
+        self.logger.addHandler(splunk)
         self.logger.setLevel(logging.INFO)
 
         # -----> S3 INFO <-----
@@ -79,14 +90,23 @@ class RipReddit:
         i = 0
         for submission in self.subreddit.stream.submissions():
             try:
+                if submission.url == '':
+                    self.logger.info("EMPTY SUBMISSION URL! <-----")
+                    continue
+                sub_url = submission.url
+                if submission.url[0] == ':':
+                    self.logger.info("FOUND A URL WITH THE WEIRD COLON THING!!")
+                    sub_url = submission.url[1:]
                 cat_stuff = {'epoch_time': str(self.curr_time()),
                              'submission_id': submission.id,
-                             'submission_url': submission.url,
+                             'submission_url': sub_url,
                              'downloaded': 'False',
                              'stored_to_s3': 'False',
                              'tweet': 'Not_Ready'}
+                self.logger.info("HERE IS THE COMPLETED URL!!! ----->" + sub_url)
                 dyna.add_item(self.table_name, cat_stuff)
                 self.logger.info('Submission: ' + submission.id + ' received!')
+                time.sleep(5)
             except Exception as e:
                 self.logger.error('Something went wrong, here it is: ' + str(e))
             if i >= num:
@@ -101,7 +121,7 @@ class RipReddit:
                 results = self.rekog.detect_labels(Image={'Bytes': imgfile.read()}, MinConfidence=1)
             return results
         except Exception as e:
-            self.looger.error("Could not open file: " + filename)
+            self.logger.error("Could not open file: " + filename + " " + str(e))
             return {}
 
     # -----> SLEEPY TIME! <-----
@@ -112,49 +132,89 @@ class RipReddit:
 
     # -----> RIP PICTURE <-----
     def rip_picture(self, dyna):
-        items = dyna.scan_table_allpages(self.table_name, filter_key='downloaded', filter_value='False')
-        for item in items:
-            image_file_name = item['submission_url'].split('/')[-1]
+        pic_check = dyna.scan_table_allpages(self.table_name, filter_key='tweet', filter_value='READY')
+        if len(pic_check) < 5:
+            self.logger.info(" !!! There appear to be " + str(len(pic_check)) + " pictures ready to tweet!")
+            items = dyna.scan_table_allpages(self.table_name, filter_key='downloaded', filter_value='False')
+            for item in items:
+                image_file_name = item['submission_url'].split('/')[-1]
 
-            if image_file_name.lower().endswith('.jpg'):
-                full_path = self.image_path + '/' + image_file_name
-                try:
-                    urllib.request.urlretrieve(item['submission_url'], full_path)
-                    self.logger.info("Image Retrieved: " + image_file_name)
-                except Exception as e:
-                    self.logger.error('=======\n' + item['submission_url'] + ' FAILED: ' + str(e) + '\n=======')
-                    continue
-                # dyn.delete_item(table_name, 'epoch_time', item['epoch_time'])
-                image_info = self.get_rekognition_info(full_path)
-                for stuff in image_info['Labels']:
-                    if stuff['Name'] == 'Person' or stuff['Name'] == 'Human':
-                        self.logger.info("There is a person in this image! -----> DEREZ <-----")
-                        try:
-                            dyna.delete_item(self.table_name, 'epoch_time', item['epoch_time'])
-                        except Exception as e:
-                            self.logger.info("There was an ERROR deleting the DB entry: " + str(e))
-                    elif stuff['Name'] == 'Cat':
-                        self.logger.info("There is a CAT in this image! -----> APPROPRIATING CAT <-------")
-                        self.s3.meta.client.upload_file(full_path, 'master-control-program', 'images/'
-                                                        + image_file_name)
-                        try:
-                            self.logger.info("DOWNLOADED: Updating DynamoDB: "
-                                             + str(dyna.update_item('epoch_time', item['epoch_time'],
-                                                                    'downloaded', 'False', 'True')))
-                        except Exception as e:
-                            self.logger.error('ERROR: ' + str(e))
-                        try:
-                            self.logger.info("READY FOR TWEET: Updating DynamoDB: "
-                                             + str(dyna.update_item('epoch_time', item['epoch_time'],
-                                                                    'tweet', 'NOT_READY', 'READY')))
-                        except Exception as e:
-                            self.logger.error('ERROR: ' + str(e))
-                        try:
-                            self.logger.info("UPLOADED TO S3: Updating DynamoDB: "
-                                             + str(dyna.update_item('epoch_time', item['epoch_time'],
-                                                                    'stored_to_s3', 'False', 'True')))
-                        except Exception as e:
-                            self.logger.error('ERROR: ' + str(e))
+                if image_file_name.lower().endswith('.jpg'):
+                    full_path = self.image_path + '/' + image_file_name
+                    try:
+                        urllib.request.urlretrieve(item['submission_url'], full_path)
+                        self.logger.info("Image Retrieved: " + image_file_name)
+                    except Exception as e:
+                        self.logger.error('=======\n' + item['submission_url'] + ' FAILED: ' + str(e) + '\n=======')
+                        continue
+                    # dyn.delete_item(table_name, 'epoch_time', item['epoch_time'])
+                    image_info = self.get_rekognition_info(full_path)
+                    for stuff in image_info['Labels']:
+                        if stuff['Name'] == 'Person' or stuff['Name'] == 'Human':
+                            self.logger.info("There is a person in this image! -----> DEREZ <-----")
+                            try:
+                                dyna.delete_item(self.table_name, 'epoch_time', item['epoch_time'])
+                                time.sleep(5)
+                            except Exception as e:
+                                self.logger.info("There was an ERROR. Deleting the DB entry: " + str(e))
+                        elif stuff['Name'] == 'Cat':
+                            self.logger.info("There is a CAT in this image! -----> APPROPRIATING CAT <-------")
+                            self.s3.meta.client.upload_file(full_path, 'master-control-program', 'images/'
+                                                            + image_file_name)
+                            try:
+                                response = dyna.update_item('epoch_time', item['epoch_time'], 'downloaded',
+                                                            'False', 'True')
+                                self.logger.info("DOWNLOADED: Updating DynamoDB: "
+                                                 + str(response['ResponseMetadata']['HTTPStatusCode']))
+                                time.sleep(5)
+                            except Exception as e:
+                                self.logger.error('ERROR: ' + str(e))
+                            try:
+                                response = dyna.update_item('epoch_time', item['epoch_time'], 'tweet',
+                                                            'NOT_READY', 'READY')
+                                self.logger.info("READY FOR TWEET: Updating DynamoDB: "
+                                                 + str(response['ResponseMetadata']['HTTPStatusCode']))
+                                time.sleep(5)
+                            except Exception as e:
+                                self.logger.error('ERROR: ' + str(e))
+                                time.sleep(5)
+                            try:
+                                response = dyna.update_item('epoch_time', item['epoch_time'], 'stored_to_s3',
+                                                            'False', 'True')
+                                self.logger.info("UPLOADED TO S3: Updating DynamoDB: "
+                                                 + str(response['ResponseMetadata']['HTTPStatusCode']))
+                                time.sleep(5)
+                            except Exception as e:
+                                self.logger.error('ERROR: ' + str(e))
+                                time.sleep(5)
+                            try:
+                                response = dyna.update_item('epoch_time', item['epoch_time'], 'submission_id',
+                                                            item['submission_id'], item['submission_id'])
+                                self.logger.info("UPLOADED TO S3: Updating DynamoDB: "
+                                                 + str(response['ResponseMetadata']['HTTPStatusCode']))
+                                time.sleep(5)
+                            except Exception as e:
+                                self.logger.error('ERROR: ' + str(e))
+                                time.sleep(5)
+                            try:
+                                response = dyna.update_item('epoch_time', item['epoch_time'], 'submission_url',
+                                                            item['submission_url'], item['submission_url'])
+                                self.logger.info("UPLOADED TO S3: Updating DynamoDB: "
+                                                 + str(response['ResponseMetadata']['HTTPStatusCode']))
+                                time.sleep(5)
+                            except Exception as e:
+                                self.logger.error('ERROR: ' + str(e))
+                                time.sleep(5)
+                self.sleepy_time(5)
+
+    # -----> Delete Not Ready <-----
+    def delete_not_ready(self, dyna):
+        not_ready = dyna.scan_table_allpages(self.table_name, filter_key='tweet', filter_value='Not_Ready')
+        self.logger.info(" !!! There appear to be " + str(len(not_ready)) + " records 'not ready' ----> DEREZ <---- ")
+        for item in not_ready:
+            self.logger.info("DEREZ --> " + item['epoch_time'])
+            dyna.delete_item(self.table_name, 'epoch_time', item['epoch_time'])
+            time.sleep(5)
 
 
 # -----> DynamoDB WRAPPER FUNCTIONS <-----
@@ -303,5 +363,5 @@ while True:
     rip.reddit_stream(dynamo, 20)
     rip.rip_picture(dynamo)
     rip.buddy_check()
+    rip.delete_not_ready(dynamo)
     rip.sleepy_time(5)
-

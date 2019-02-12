@@ -3,6 +3,7 @@ import boto3
 import configparser
 import logging
 import time
+from splunk_handler import SplunkHandler
 from collections import defaultdict
 
 
@@ -10,10 +11,20 @@ from collections import defaultdict
 class MCP:
     def __init__(self):
 
+        # ----> Splunk Log to HEC <----
+        splunk = SplunkHandler(
+            host='10.0.0.62',
+            port='8088',
+            token='e95a7c92-4442-44b6-af83-c11d2946f64b',
+            index='mcp',
+            verify=False
+        )
+
         # ----> BOTO3 SETUP <----
         self.s3 = boto3.resource('s3')
 
         self.ec2 = boto3.resource('ec2')
+
         self.instance_name = 'MCP_cloud'
         self.image_id = 'ami-0cd3dfa4e37921605'  # 'ami-9c0638f9' - centos7
         self.image_type = 't2.micro'
@@ -26,6 +37,7 @@ class MCP:
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
+        self.logger.addHandler(splunk)
         self.logger.setLevel(logging.INFO)
         self.logger.info("------------- MASTER CONTROL PROGRAM - ONLINE ------------- ")
 
@@ -67,7 +79,8 @@ class MCP:
         # -----> EC2 STARTUP SCRIPT <-----
         self.user_data = '#!/bin/bash \nyum -y update && yum -y upgrade \nyum -y install python36 python36-devel ' \
                          'python36-pip python36-setuptools git gcc \n' \
-                         'python36 -m pip install --upgrade pip \npython36 -m pip install boto3 tweepy praw psutil \n'\
+                         'python36 -m pip install --upgrade pip \npython36 -m pip install boto3 tweepy praw psutil ' \
+                         'splunk_handler \n'\
                          'echo "ACCESS_TOKEN=' + self.access_token + '" >> /etc/environment\n' \
                          'echo "ACCESS_TOKEN_SECRET=' + self.access_token_secret + '" >> /etc/environment\n' \
                          'echo "CONSUMER_KEY=' + self.consumer_key + '" >> /etc/environment\n' \

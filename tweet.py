@@ -6,12 +6,22 @@ import os
 import psutil
 import time
 import tweepy
+from splunk_handler import SplunkHandler
 
 
 class TweetPics:
     def __init__(self):
 
         self.table_name = os.environ['REDDIT_TABLE_NAME']
+
+        # ----> Splunk Log to HEC <----
+        splunk = SplunkHandler(
+            host='98.214.82.236',
+            port='8088',
+            token='e95a7c92-4442-44b6-af83-c11d2946f64b',
+            index='mcp',
+            verify=False
+        )
 
         # -----> SETUP LOGGING <-----
         self.logger = logging.getLogger(__name__)
@@ -20,6 +30,7 @@ class TweetPics:
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
+        self.logger.addHandler(splunk)
         self.logger.setLevel(logging.INFO)
 
         # -----> S3 INFO <-----
@@ -77,13 +88,56 @@ class TweetPics:
         pics = dyna.scan_table_allpages(self.table_name, filter_key='tweet', filter_value='READY')
         self.logger.info(" ---> GRABBING PICS READY TO TWEET <---")
         for pic in pics:
+            self.logger.info("TWEET HERE IS THE URL JUST BEFORE TWEET!!! " + pic['submission_url'])
             image_file_name = '/tmp/images/' + pic['submission_url'].split('/')[-1]
             self.logger.info("Tweet: Checking if Image Exists")
             if os.path.exists(image_file_name):
                 self.update_status_with_media(self.kb_message, image_file_name)
                 self.logger.info("!!! TWEETED: " + image_file_name + " !!!")
-                self.logger.info("PICTURE TWEETED: Updating DynamoDB: "
-                                 + str(dyna.update_item('epoch_time', pic['epoch_time'], 'tweet', 'READY', 'DONE')))
+                try:
+                    self.logger.info("PICTURE TWEETED: Updating DynamoDB: "
+                                     + str(dyna.update_item('epoch_time', pic['epoch_time'],
+                                                            'tweet', 'READY', 'DONE')))
+                    time.sleep(5)
+                except Exception as e:
+                    self.logger.error('ERROR: ' + str(e))
+                    time.sleep(5)
+                try:
+                    self.logger.info("Tweet: Updating DynamoDB: "
+                                     + str(dyna.update_item('epoch_time', pic['epoch_time'],
+                                                            'downloaded', 'True', 'True')))
+                    time.sleep(5)
+                except Exception as e:
+                    self.logger.error('ERROR: ' + str(e))
+                try:
+                    self.logger.info("Tweet: Updating DynamoDB: DOWNLOADED: "
+                                     + str(dyna.update_item('epoch_time', pic['epoch_time'],
+                                                            'stored_to_s3', 'True', 'True')))
+                    time.sleep(5)
+                except Exception as e:
+                    self.logger.error('ERROR: ' + str(e))
+                    time.sleep(5)
+                try:
+                    self.logger.info("Tweet: Updating DynamoDB: "
+                                     + str(dyna.update_item('epoch_time', pic['epoch_time'],
+                                                            'submission_id', pic['submission_id'],
+                                                            pic['submission_id'])))
+                    time.sleep(5)
+                except Exception as e:
+                    self.logger.error('ERROR: ' + str(e))
+                    time.sleep(5)
+                try:
+                    if pic['submission_url'][0] == ':':
+                        sub_url = pic['submission_url'][1:]
+                    else:
+                        sub_url = pic['submission_url']
+                    self.logger.info("Tweet: Updating DynamoDB: "
+                                     + str(dyna.update_item('epoch_time', pic['epoch_time'],
+                                                            'submission_url', pic['submission_url'], sub_url)))
+                    time.sleep(5)
+                except Exception as e:
+                    self.logger.error('ERROR Tweet: ' + str(e))
+                    time.sleep(5)
                 self.sleepy_time(5)
             else:
                 try:
@@ -100,8 +154,50 @@ class TweetPics:
                     dyna.delete_item(self.table_name, 'epoch_time', pic['epoch_time'])
                     self.update_status_with_media(self.kb_message, image_file_name)
                     self.logger.info("!!! TWEETED: " + image_file_name + " !!!")
-                    self.logger.info("PICTURE TWEETED: Updating DynamoDB: "
-                                     + str(dyna.update_item('epoch_time', pic['epoch_time'], 'tweet', 'READY', 'DONE')))
+                    try:
+                        self.logger.info("PICTURE TWEETED: Updating DynamoDB: "
+                                         + str(dyna.update_item('epoch_time', pic['epoch_time'],
+                                                                'tweet', 'READY', 'DONE')))
+                        time.sleep(5)
+                    except Exception as e:
+                        self.logger.error('ERROR Tweet: ' + str(e))
+                        time.sleep(5)
+                    try:
+                        self.logger.info("Tweet: Updating DynamoDB: "
+                                         + str(dyna.update_item('epoch_time', pic['epoch_time'],
+                                                                'downloaded', 'True', 'True')))
+                        time.sleep(5)
+                    except Exception as e:
+                        self.logger.error('ERROR Tweet: ' + str(e))
+                    try:
+                        self.logger.info("Tweet: Updating DynamoDB: DOWNLOADED: "
+                                         + str(dyna.update_item('epoch_time', pic['epoch_time'],
+                                                                'stored_to_s3', 'True', 'True')))
+                        time.sleep(5)
+                    except Exception as e:
+                        self.logger.error('ERROR Tweet: ' + str(e))
+                        time.sleep(5)
+                    try:
+                        self.logger.info("Tweet: Updating DynamoDB: "
+                                         + str(dyna.update_item('epoch_time', pic['epoch_time'],
+                                                                'submission_id', pic['submission_id'],
+                                                                pic['submission_id'])))
+                        time.sleep(5)
+                    except Exception as e:
+                        self.logger.error('ERROR: ' + str(e))
+                        time.sleep(5)
+                    try:
+                        if pic['submission_url'][0] == ':':
+                            sub_url = pic['submission_url'][1:]
+                        else:
+                            sub_url = pic['submission_url']
+                        self.logger.info("Tweet: Updating DynamoDB: "
+                                         + str(dyna.update_item('epoch_time', pic['epoch_time'],
+                                                                'submission_url', pic['submission_url'], sub_url)))
+                        time.sleep(5)
+                    except Exception as e:
+                        self.logger.error('ERROR Tweet: ' + str(e))
+                        time.sleep(5)
                     self.sleepy_time(5)
 
 
