@@ -11,14 +11,7 @@ from collections import defaultdict
 class MCP:
     def __init__(self):
 
-        # ----> Splunk Log to HEC <----
-        splunk = SplunkHandler(
-            host='10.0.0.62',
-            port='8088',
-            token='e95a7c92-4442-44b6-af83-c11d2946f64b',
-            index='mcp',
-            verify=False
-        )
+
 
         # ----> BOTO3 SETUP <----
         self.s3 = boto3.resource('s3')
@@ -75,6 +68,22 @@ class MCP:
         self.access_token_secret = parser['twitter']['access_token_secret']
         self.consumer_key = parser['twitter']['consumer_key']
         self.consumer_secret = parser['twitter']['consumer_secret']
+        self.splunk_host = parser['splunk']['host']
+        self.splunk_remote_host = parser['splunk']['remote_host']
+        self.splunk_port = parser['splunk']['port']
+        self.splunk_token = parser['splunk']['token']
+        self.splunk_index = parser['splunk']['index']
+        self.splunk_verify = parser['splunk']['verify']
+
+
+        # ----> Splunk Log to HEC <----
+        splunk = SplunkHandler(
+            host=self.splunk_host,
+            port=self.splunk_port,
+            token=self.splunk_token,
+            index=self.splunk_index,
+            verify=self.splunk_verify
+        )
 
         # -----> EC2 STARTUP SCRIPT <-----
         self.user_data = '#!/bin/bash \nyum -y update && yum -y upgrade \nyum -y install python36 python36-devel ' \
@@ -92,7 +101,13 @@ class MCP:
                          'echo "USER_AGENT=' + self.user_agent + '" >> /etc/environment\n' \
                          'echo "SUBREDDIT=' + self.subreddit + '" >> /etc/environment\n' \
                          'echo "REDDIT_TABLE_NAME=' + self.reddit_table_name + '" >> /etc/environment\n' \
-                         'aws s3 cp s3://master-control-program/tweet.py /tmp \n' \
+                         'echo "SPLUNK_HOST=' + self.splunk_remote_host + '" >> /etc/environment\n' \
+                         'echo "SPLUNK_PORT=' + self.splunk_port + '" >> /etc/environment\n' \
+                         'echo "SPLUNK_TOKEN=' + self.splunk_token + '" >> /etc/environment\n' \
+                         'echo "SPLUNK_INDEX=' + self.splunk_index + '" >> /etc/environment\n' \
+                         'echo "SPLUNK_VERIFY=' + self.splunk_verify + '" >> /etc/environment\n' \
+                                                                                                                                                                                                                                                                           'echo "SUBREDDIT=' + self.subreddit + '" >> /etc/environment\n' \
+                                                                                                                                                                                                                                                                                                                 'aws s3 cp s3://master-control-program/tweet.py /tmp \n' \
                          'aws s3 cp s3://master-control-program/rip_reddit.py /tmp \n' \
                          'touch /tmp/MCP_Master_Log.log \n' \
                          'crontab -l | { cat; echo "*/5 * * * * python36 /tmp/rip_reddit.py"; } | crontab - \n' \
