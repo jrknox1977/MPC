@@ -15,7 +15,7 @@ class MCP:
         splunk = SplunkHandler(
             host='10.0.0.62',
             port='8088',
-            token='e95a7c92-4442-44b6-af83-c11d2946f64b',
+            token=
             index='mcp',
             verify=False
         )
