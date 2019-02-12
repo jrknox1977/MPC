@@ -1,0 +1,16 @@
+[reddit]
+client_id =
+client_secret =
+username =
+password =
+user_agent =
+subreddit =
+
+[twitter]
+access_token =
+access_token_secret =
+consumer_key =
+consumer_secret =
+
+[dynamodb]
+table_name =
