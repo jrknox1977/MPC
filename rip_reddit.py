@@ -15,9 +15,9 @@ class RipReddit:
 
         # ----> Splunk Log to HEC <----
         splunk = SplunkHandler(
-            host='98.214.82.236',
+            host=
             port='8088',
-            token='e95a7c92-4442-44b6-af83-c11d2946f64b',
+            token=
             index='mcp',
             verify=False
         )
