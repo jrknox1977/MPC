@@ -14,3 +14,11 @@ consumer_secret =
 
 [dynamodb]
 table_name =
+
+[splunk]
+host =
+remote_host =
+port =
+token =
+index =
+verify =
