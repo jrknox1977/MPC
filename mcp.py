@@ -104,6 +104,7 @@ class MCP:
                          'echo "SPLUNK_INDEX=' + self.splunk_index + '" >> /etc/environment\n' \
                          'echo "SPLUNK_VERIFY=' + self.splunk_verify + '" >> /etc/environment\n' \
                          'aws s3 cp s3://master-control-program/rip_reddit.py /tmp \n' \
+                         'aws s3 cp s3://master-control-program.tweet.py /tmp \n' \
                          'touch /tmp/MCP_Master_Log.log \n' \
                          'crontab -l | { cat; echo "*/5 * * * * python36 /tmp/rip_reddit.py"; } | crontab - \n' \
                          'crontab -l | { cat; echo "*/5 * * * * python36 /tmp/tweet.py"; } | crontab - \n'
