@@ -68,7 +68,7 @@ class MCP:
             port=self.splunk_port,
             token=self.splunk_token,
             index=self.splunk_index,
-            verify=self.splunk_verify
+            verify=False
         )
 
         # -----> SETUP LOGGING <-----

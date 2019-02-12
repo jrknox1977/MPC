@@ -19,7 +19,7 @@ class RipReddit:
             port=os.environ['SPLUNK_PORT'],
             token=os.environ['SPLUNK_TOKEN'],
             index=os.environ['SPLUNK_INDEX'],
-            verify=os.environ['SPLUNK_VERIFY']
+            verify=False
         )
 
         # -----> SETUP LOGGING <-----
