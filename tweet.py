@@ -16,11 +16,11 @@ class TweetPics:
 
         # ----> Splunk Log to HEC <----
         splunk = SplunkHandler(
-            host='98.214.82.236',
-            port='8088',
-            token='e95a7c92-4442-44b6-af83-c11d2946f64b',
-            index='mcp',
-            verify=False
+            host=os.environ['SPLUNK_HOST'],
+            port=os.environ['SPLUNK_PORT'],
+            token=os.environ['SPLUNK_TOKEN'],
+            index=os.environ['SPLUNK_INDEX'],
+            verify=os.environ['SPLUNK_VERIFY']
         )
 
         # -----> SETUP LOGGING <-----
