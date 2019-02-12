@@ -11,8 +11,6 @@ from collections import defaultdict
 class MCP:
     def __init__(self):
 
-
-
         # ----> BOTO3 SETUP <----
         self.s3 = boto3.resource('s3')
 
@@ -22,17 +20,6 @@ class MCP:
         self.image_id = 'ami-0cd3dfa4e37921605'  # 'ami-9c0638f9' - centos7
         self.image_type = 't2.micro'
         self.image_role = 'ec2-admin'
-
-        # -----> SETUP LOGGING <-----
-        self.logger = logging.getLogger(__name__)
-        handler = logging.FileHandler('/var/log/MCP_Master_Log.log')
-        handler.setLevel(logging.INFO)
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        self.logger.addHandler(splunk)
-        self.logger.setLevel(logging.INFO)
-        self.logger.info("------------- MASTER CONTROL PROGRAM - ONLINE ------------- ")
 
         # -----> ARGPARSE <-----
         help_text = "MCP: MASTER CONTROL PROGRAM: automated system to rip picture from reddit and post them on twitter"
@@ -75,7 +62,6 @@ class MCP:
         self.splunk_index = parser['splunk']['index']
         self.splunk_verify = parser['splunk']['verify']
 
-
         # ----> Splunk Log to HEC <----
         splunk = SplunkHandler(
             host=self.splunk_host,
@@ -84,6 +70,17 @@ class MCP:
             index=self.splunk_index,
             verify=self.splunk_verify
         )
+
+        # -----> SETUP LOGGING <-----
+        self.logger = logging.getLogger(__name__)
+        handler = logging.FileHandler('/var/log/MCP_Master_Log.log')
+        handler.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+        self.logger.addHandler(splunk)
+        self.logger.setLevel(logging.INFO)
+        self.logger.info("------------- MASTER CONTROL PROGRAM - ONLINE ------------- ")
 
         # -----> EC2 STARTUP SCRIPT <-----
         self.user_data = '#!/bin/bash \nyum -y update && yum -y upgrade \nyum -y install python36 python36-devel ' \
@@ -106,8 +103,6 @@ class MCP:
                          'echo "SPLUNK_TOKEN=' + self.splunk_token + '" >> /etc/environment\n' \
                          'echo "SPLUNK_INDEX=' + self.splunk_index + '" >> /etc/environment\n' \
                          'echo "SPLUNK_VERIFY=' + self.splunk_verify + '" >> /etc/environment\n' \
-                                                                                                                                                                                                                                                                           'echo "SUBREDDIT=' + self.subreddit + '" >> /etc/environment\n' \
-                                                                                                                                                                                                                                                                                                                 'aws s3 cp s3://master-control-program/tweet.py /tmp \n' \
                          'aws s3 cp s3://master-control-program/rip_reddit.py /tmp \n' \
                          'touch /tmp/MCP_Master_Log.log \n' \
                          'crontab -l | { cat; echo "*/5 * * * * python36 /tmp/rip_reddit.py"; } | crontab - \n' \
